@@ -32,6 +32,9 @@ public abstract class Entity {
     public static final int INVALID_ID = -1;
 
     public int getId() {
+        /*if (id == null){
+            return INVALID_ID;
+        }*/
         return id;
     }
 

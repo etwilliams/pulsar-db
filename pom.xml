@@ -17,4 +17,16 @@
             <version>5.1.6</version>
          </dependency>
     </dependencies>
+    <distributionManagement>
+        <repository>
+            <id>nexus</id>
+            <name>Releases</name>
+            <url>http://plnupvengrep01.corp.globalstar.com:8081/repository/globalstar-releases</url>
+        </repository>
+        <snapshotRepository>
+            <id>nexus</id>
+            <name>Snapshot</name>
+            <url>http://plnupvengrep01.corp.globalstar.com:8081/repository/globalstar-snapshots</url>
+        </snapshotRepository>
+    </distributionManagement>
 </project>
