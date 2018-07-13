@@ -10,6 +10,8 @@ public abstract class MySQLTypeConverter<T> extends AbstractTypeConverter<T> {
 
     public static final String DB_TYPE_VARCHAR = "VARCHAR";
     public static final String DB_TYPE_TEXT = "TEXT";
+    public static final String DB_TYPE_MEDIUM_TEXT = "MEDIUMTEXT";
+    public static final String DB_TYPE_LONG_TEXT = "LONGTEXT";
     public static final String DB_TYPE_INTEGER = "INT";
     public static final String DB_TYPE_LONG = "BIGINT";
     public static final String DB_TYPE_DOUBLE = "DOUBLE";
