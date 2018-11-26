@@ -5,12 +5,13 @@ import java.lang.reflect.Field;
 import java.sql.ResultSet;
 
 import java.sql.SQLException;
+import java.util.Date;
 
 /**
  *
  * @author etwilliams
  */
-public class DateTypeConverter extends MySQLTypeConverter<Long> {
+public class DateTypeConverter extends MySQLTypeConverter<Date> {
 
     @Override
     public String getDatabaseType(Field field) {
@@ -19,13 +20,14 @@ public class DateTypeConverter extends MySQLTypeConverter<Long> {
 
     @Override
     public Long getDatabaseValue(Entity entity, String fieldName) {
-        Long val = (Long) getFieldValue(entity, fieldName);
-        return val;
+        Date val = (Date) getFieldValue(entity, fieldName);
+        return val.getTime();
     }
 
     @Override
-    public Long getValue(ResultSet rs, String columnName) throws SQLException {
-        return rs.getLong(columnName);
+    public Date getValue(ResultSet rs, String columnName) throws SQLException {
+        long val = rs.getLong(columnName);
+        return new Date(val);
     }
 
 }

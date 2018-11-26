@@ -11,6 +11,7 @@ import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Date;
 import java.util.Objects;
 
 /**
@@ -50,9 +51,9 @@ public class Column {
 
         if (field.isAnnotationPresent(DbSize.class)) {
             size = ReflectUtil.getSize(field);
-        } else if (type.equals(IntegerTypeConverter.DB_TYPE_INTEGER) && size == 0) {
+        } else if (type != null && type.equals(IntegerTypeConverter.DB_TYPE_INTEGER) && size == 0) {
             size = MySQLTypeConverter.DB_DEFAULT_INT_SIZE;
-        } else if (type.equals(IntegerTypeConverter.DB_TYPE_BOOLEAN) && size == 0) {
+        } else if (type != null && type.equals(IntegerTypeConverter.DB_TYPE_BOOLEAN) && size == 0) {
             size = MySQLTypeConverter.DB_DEFAULT_BOOLEAN_SIZE;
         }
         /*else if ((type.equals(IntegerTypeConverter.DB_TYPE_BOOLEAN)

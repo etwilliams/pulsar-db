@@ -6,7 +6,9 @@ import com.dakuupa.pulsar.annotations.DbPrimaryKey;
 import com.dakuupa.pulsar.annotations.DbSize;
 import com.dakuupa.pulsar.annotations.DbUnique;
 import com.dakuupa.pulsar.typeconverter.AbstractTypeConverter;
+import com.dakuupa.pulsar.typeconverter.TypeConverter;
 import com.dakuupa.pulsar.typeconverter.mysql.BooleanTypeConverter;
+import com.dakuupa.pulsar.typeconverter.mysql.DateTypeConverter;
 import com.dakuupa.pulsar.typeconverter.mysql.DoubleTypeConverter;
 import com.dakuupa.pulsar.typeconverter.mysql.FloatTypeConverter;
 import com.dakuupa.pulsar.typeconverter.mysql.IntegerTypeConverter;
@@ -52,6 +54,7 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
     private static final SimpleDateFormat DATE_FORMATTER = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSZ");
     private static File logFile;
     private static boolean enableLogging;
+    private static boolean logToStdOut;
 
     private static final HashMap<Class, Class> typeConverters = new HashMap<>();
     private static final HashMap<String, Class> primitiveTypeConverters = new HashMap<>();
@@ -64,6 +67,7 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
         typeConverters.put(Long.class, LongTypeConverter.class);
         typeConverters.put(Float.class, FloatTypeConverter.class);
         typeConverters.put(Boolean.class, BooleanTypeConverter.class);
+        typeConverters.put(Date.class, DateTypeConverter.class);
 
         //init primitive types also
         primitiveTypeConverters.put("int", IntegerTypeConverter.class);
@@ -74,6 +78,18 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
     }
 
     public AbstractDatabaseManager(Connection con) {
+        init(con, (Class<T>) ((ParameterizedType) getClass().getGenericSuperclass()).getActualTypeArguments()[0]);
+    }
+    
+    public AbstractDatabaseManager(Connection con, TypeConverter... converters) {
+        enableLogging = true;
+        logToStdOut = true;
+        
+        for (TypeConverter converter : converters){
+            Class<T> clazz = (Class<T>)((ParameterizedType)converter.getClass().getGenericSuperclass()).getActualTypeArguments()[0];
+            typeConverters.put(clazz, converter.getClass());
+        }
+        
         init(con, (Class<T>) ((ParameterizedType) getClass().getGenericSuperclass()).getActualTypeArguments()[0]);
     }
 
@@ -201,8 +217,8 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
 
                     if (!entityColumn.equals(dbColumn)) {
                         log("Column changes for " + columnName);
-                        log("EN " + entityColumn.toString());
-                        log("DB " + dbColumn.toString());
+                        log("Entity\t " + entityColumn.toString());
+                        log("DB\t " + dbColumn.toString());
 
                         //remove unique key
                         if (dbColumn.isUnique() && !entityColumn.isUnique()) {
@@ -562,6 +578,7 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
                 statement.close();
 
                 //grab last id
+                //TODO this is sketchy
                 statement = getStatement();
                 rs = statement.executeQuery("select last_insert_id() as last_id from " + tableName);
 
@@ -979,7 +996,9 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
                         Class<?> converterClazz = typeConverters.get(type);
                         log(field.getName() + " using type converter: " + converterClazz.getCanonicalName());
                         AbstractTypeConverter converter = (AbstractTypeConverter) Class.forName(converterClazz.getCanonicalName()).newInstance();
-                        putValue(cv, columnName, converter.getDatabaseValue(entity, field.getName()));
+                        Object obj = converter.getDatabaseValue(entity, field.getName());
+                        log(field.getName() + " value is "+ converter.getDatabaseValue(entity, field.getName()));
+                        putValue(cv, columnName, obj);
                     } else if (primitiveTypeConverters.containsKey(type.getName())) {
                         Class<?> converterClazz = primitiveTypeConverters.get(type.getName());
                         log(field.getName() + " using primitive type converter: " + converterClazz.getCanonicalName());
@@ -1128,20 +1147,30 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
             }
         }
     }
-    
+
     public static void setLoggingEnabled(boolean enabled) {
         enableLogging = enabled;
     }
 
-    private void log(String log) {
-        if (enableLogging && logFile != null && logFile.exists() && logFile.canWrite()) {
-            try (FileOutputStream fos = new FileOutputStream(logFile, true); OutputStreamWriter osw = new OutputStreamWriter(fos)) {
-                osw.write(DATE_FORMATTER.format(new Date()) + " " + getClass().getSimpleName() + "\t" + log);
-                osw.write("\n");
-                osw.flush();
-                osw.close();
-            } catch (Exception ex) {
+    public static void setLogToStdOut(boolean logToStdOut) {
+        AbstractDatabaseManager.logToStdOut = logToStdOut;
+    }
 
+    private void log(String log) {
+        if (enableLogging) {
+            String msg = DATE_FORMATTER.format(new Date()) + " " + getClass().getSimpleName() + "\t" + log;
+            if (logToStdOut){
+                System.out.println(msg);
+            }
+            if (logFile != null && logFile.exists() && logFile.canWrite()) {
+                try (FileOutputStream fos = new FileOutputStream(logFile, true); OutputStreamWriter osw = new OutputStreamWriter(fos)) {
+                    osw.write(msg);
+                    osw.write("\n");
+                    osw.flush();
+                    osw.close();
+                } catch (Exception ex) {
+
+                }
             }
         }
     }
