@@ -19,8 +19,7 @@ public class FloatTypeConverter extends MySQLTypeConverter<Float> {
 
     @Override
     public Float getDatabaseValue(Entity entity, String fieldName) {
-        Float val = (Float) getFieldValue(entity, fieldName);
-        return val;
+        return (Float) getFieldValue(entity, fieldName);
     }
 
     @Override

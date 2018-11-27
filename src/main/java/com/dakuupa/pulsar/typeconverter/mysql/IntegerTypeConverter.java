@@ -20,8 +20,7 @@ public class IntegerTypeConverter extends MySQLTypeConverter<Integer> {
 
     @Override
     public Integer getDatabaseValue(Entity entity, String fieldName) {
-        Integer val = (Integer) getFieldValue(entity, fieldName);
-        return val;
+        return (Integer) getFieldValue(entity, fieldName);
     }
 
     @Override

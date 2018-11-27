@@ -20,11 +20,9 @@ public class StringTypeConverter extends MySQLTypeConverter<String> {
 
         if (field.isAnnotationPresent(DbMysqlText.class)) {
             return DB_TYPE_TEXT;
-        }
-        else if (field.isAnnotationPresent(DbMysqlMediumText.class)) {
+        } else if (field.isAnnotationPresent(DbMysqlMediumText.class)) {
             return DB_TYPE_MEDIUM_TEXT;
-        }
-        else if (field.isAnnotationPresent(DbMysqlLongText.class)){
+        } else if (field.isAnnotationPresent(DbMysqlLongText.class)) {
             return DB_TYPE_LONG_TEXT;
         }
 
@@ -33,8 +31,7 @@ public class StringTypeConverter extends MySQLTypeConverter<String> {
 
     @Override
     public String getDatabaseValue(Entity entity, String fieldName) {
-        String val = (String) getFieldValue(entity, fieldName);
-        return val;
+        return (String) getFieldValue(entity, fieldName);
     }
 
     @Override

@@ -19,8 +19,7 @@ public class BooleanTypeConverter extends MySQLTypeConverter<Boolean> {
 
     @Override
     public Boolean getDatabaseValue(Entity entity, String fieldName) {
-        Boolean val = (Boolean) getFieldValue(entity, fieldName);
-        return val;
+        return (Boolean) getFieldValue(entity, fieldName);
     }
 
     @Override

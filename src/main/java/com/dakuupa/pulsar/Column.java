@@ -33,6 +33,8 @@ public class Column {
 
     public Column(Field field, AbstractDatabaseManager manager) {
 
+        Class<?> clztype = field.getType();
+        
         name = ReflectUtil.getColumnName(field);
         type = manager.getColumnType(field);
         nullable = true;
@@ -56,13 +58,9 @@ public class Column {
         } else if (type != null && type.equals(IntegerTypeConverter.DB_TYPE_BOOLEAN) && size == 0) {
             size = MySQLTypeConverter.DB_DEFAULT_BOOLEAN_SIZE;
         }
-        /*else if ((type.equals(IntegerTypeConverter.DB_TYPE_BOOLEAN)
-                || type.equals(IntegerTypeConverter.DB_TYPE_FLOAT)
-                || type.equals(IntegerTypeConverter.DB_TYPE_LONG)
-                || type.equals(IntegerTypeConverter.DB_TYPE_DOUBLE))
-                && size == 0) {
-            size = MySQLTypeConverter.DB_DEFAULT_NUMBER_SIZE;
-        }*/
+        else if (clztype == Date.class && size == 0) {
+            size = MySQLTypeConverter.DB_DEFAULT_BIG_INT_SIZE;
+        }
     }
 
     public Column(ResultSet rs) throws SQLException {
@@ -70,13 +68,14 @@ public class Column {
         String typeField = rs.getString("Type");
         String nullableField = rs.getString("Null");
         String keyField = rs.getString("Key");
-        //String defaultValField = rs.getString("Default");
         String extraField = rs.getString("Extra");
 
         name = columnNameField;
         try {
-            size = Integer.parseInt(typeField.split("[\\(\\)]")[1]);
-        } catch (Exception e) {
+            if (typeField.split("[\\(\\)]").length > 1) {
+                size = Integer.parseInt(typeField.split("[\\(\\)]")[1]);
+            }
+        } catch (NumberFormatException e) {
             //ignore
         }
 
@@ -175,10 +174,7 @@ public class Column {
         if (!Objects.equals(this.name, other.name)) {
             return false;
         }
-        if (!Objects.equals(this.type, other.type)) {
-            return false;
-        }
-        return true;
+        return Objects.equals(this.type, other.type);
     }
 
     @Override

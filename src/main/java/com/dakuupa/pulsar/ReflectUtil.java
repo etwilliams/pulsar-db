@@ -19,6 +19,10 @@ import java.util.List;
  */
 public class ReflectUtil {
 
+    private ReflectUtil(){
+        //hide implicit public constructor
+    }
+    
     public static List<Field> getAllFields(Class<?> clazz) {
         List<Field> fields = new ArrayList<>();
         fields.addAll(Arrays.asList(clazz.getDeclaredFields()));
@@ -44,7 +48,7 @@ public class ReflectUtil {
 
     /**
      *
-     * @param field
+     * @param clazz
      * @return true if field has Ignore annotation
      */
     public static String tableName(Class clazz) {
@@ -61,8 +65,7 @@ public class ReflectUtil {
      */
     public static String getColumnName(Field field) {
         if (field.isAnnotationPresent(DbColumn.class)) {
-            String name = ((DbColumn) (field.getAnnotation(DbColumn.class))).name();
-            return name;
+            return (field.getAnnotation(DbColumn.class)).name();
         } else {
             return field.getName();
         }
@@ -74,8 +77,7 @@ public class ReflectUtil {
      */
     public static int getSize(Field field) {
         if (field.isAnnotationPresent(DbSize.class)) {
-            int size = ((DbSize) (field.getAnnotation(DbSize.class))).size();
-            return size;
+            return (field.getAnnotation(DbSize.class)).size();
         } else {
             return 1024;
         }
@@ -83,14 +85,11 @@ public class ReflectUtil {
 
     /**
      *
-     * @param field
+     * @param clazz
      * @return true if class has NoID annotation
      */
     public static boolean noID(Class clazz) {
-        if (clazz.isAnnotationPresent(NoID.class)) {
-            return true;
-        }
-        return false;
+        return clazz.isAnnotationPresent(NoID.class);
     }
 
     public static boolean fieldIsOkForDatabase(Field field) {

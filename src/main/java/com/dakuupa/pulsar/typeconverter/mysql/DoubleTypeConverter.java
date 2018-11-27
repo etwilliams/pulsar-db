@@ -19,8 +19,7 @@ public class DoubleTypeConverter extends MySQLTypeConverter<Double> {
 
     @Override
     public Double getDatabaseValue(Entity entity, String fieldName) {
-        Double val = (Double) getFieldValue(entity, fieldName);
-        return val;
+        return (Double) getFieldValue(entity, fieldName);
     }
 
     @Override

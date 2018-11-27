@@ -19,8 +19,7 @@ public class LongTypeConverter extends MySQLTypeConverter<Long> {
 
     @Override
     public Long getDatabaseValue(Entity entity, String fieldName) {
-        Long val = (Long) getFieldValue(entity, fieldName);
-        return val;
+        return (Long) getFieldValue(entity, fieldName);
     }
 
     @Override

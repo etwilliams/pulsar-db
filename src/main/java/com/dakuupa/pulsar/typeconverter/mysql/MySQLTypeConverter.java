@@ -23,5 +23,6 @@ public abstract class MySQLTypeConverter<T> extends AbstractTypeConverter<T> {
     public static final String DB_TYPE_BLOB = "BLOB";
     public static final Integer DB_DEFAULT_INT_SIZE = 11;
     public static final Integer DB_DEFAULT_BOOLEAN_SIZE = 1;
+    public static final Integer DB_DEFAULT_BIG_INT_SIZE = 20;
 
 }

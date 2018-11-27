@@ -16,17 +16,15 @@ import com.dakuupa.pulsar.typeconverter.mysql.LongTypeConverter;
 import com.dakuupa.pulsar.typeconverter.mysql.MySQLTypeConverter;
 import com.dakuupa.pulsar.typeconverter.mysql.StringTypeConverter;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStreamWriter;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -34,8 +32,11 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.ConsoleHandler;
+import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 /**
  * Base DB Manager Allow types are double, float, long, integer, boolean, and String values.
@@ -46,58 +47,99 @@ import java.util.logging.Logger;
  */
 public abstract class AbstractDatabaseManager<T extends Entity> {
 
+    private static final String NULL_STATEMENT_MSG = "Null statement";
+    protected Logger logger;
+
     private String tableName;
     private Connection dbConnection;
     private Class<T> entityClass;
-    private boolean debug = true;
 
-    private static final SimpleDateFormat DATE_FORMATTER = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSZ");
-    private static File logFile;
-    private static boolean enableLogging;
-    private static boolean logToStdOut;
+    private File logFile;
+    private boolean verboseLogging;
 
-    private static final HashMap<Class, Class> typeConverters = new HashMap<>();
-    private static final HashMap<String, Class> primitiveTypeConverters = new HashMap<>();
+    private static final HashMap<Class, Class> TYPE_CONVERTERS = new HashMap<>();
+    private static final HashMap<String, Class> PRIMITIVE_TYPE_CONVERTERS = new HashMap<>();
 
     static {
         //initialize default type converters
-        typeConverters.put(String.class, StringTypeConverter.class);
-        typeConverters.put(Integer.class, IntegerTypeConverter.class);
-        typeConverters.put(Double.class, DoubleTypeConverter.class);
-        typeConverters.put(Long.class, LongTypeConverter.class);
-        typeConverters.put(Float.class, FloatTypeConverter.class);
-        typeConverters.put(Boolean.class, BooleanTypeConverter.class);
-        typeConverters.put(Date.class, DateTypeConverter.class);
+        TYPE_CONVERTERS.put(String.class, StringTypeConverter.class);
+        TYPE_CONVERTERS.put(Integer.class, IntegerTypeConverter.class);
+        TYPE_CONVERTERS.put(Double.class, DoubleTypeConverter.class);
+        TYPE_CONVERTERS.put(Long.class, LongTypeConverter.class);
+        TYPE_CONVERTERS.put(Float.class, FloatTypeConverter.class);
+        TYPE_CONVERTERS.put(Boolean.class, BooleanTypeConverter.class);
+        TYPE_CONVERTERS.put(Date.class, DateTypeConverter.class);
 
         //init primitive types also
-        primitiveTypeConverters.put("int", IntegerTypeConverter.class);
-        primitiveTypeConverters.put("double", DoubleTypeConverter.class);
-        primitiveTypeConverters.put("long", LongTypeConverter.class);
-        primitiveTypeConverters.put("float", FloatTypeConverter.class);
-        primitiveTypeConverters.put("boolean", BooleanTypeConverter.class);
+        PRIMITIVE_TYPE_CONVERTERS.put("int", IntegerTypeConverter.class);
+        PRIMITIVE_TYPE_CONVERTERS.put("double", DoubleTypeConverter.class);
+        PRIMITIVE_TYPE_CONVERTERS.put("long", LongTypeConverter.class);
+        PRIMITIVE_TYPE_CONVERTERS.put("float", FloatTypeConverter.class);
+        PRIMITIVE_TYPE_CONVERTERS.put("boolean", BooleanTypeConverter.class);
     }
 
     public AbstractDatabaseManager(Connection con) {
         init(con, (Class<T>) ((ParameterizedType) getClass().getGenericSuperclass()).getActualTypeArguments()[0]);
     }
-    
-    public AbstractDatabaseManager(Connection con, TypeConverter... converters) {
-        enableLogging = true;
-        logToStdOut = true;
-        
-        for (TypeConverter converter : converters){
-            Class<T> clazz = (Class<T>)((ParameterizedType)converter.getClass().getGenericSuperclass()).getActualTypeArguments()[0];
-            typeConverters.put(clazz, converter.getClass());
-        }
-        
-        init(con, (Class<T>) ((ParameterizedType) getClass().getGenericSuperclass()).getActualTypeArguments()[0]);
+
+    public AbstractDatabaseManager(Connection dbConnection, File logFile, boolean verboseLogging) {
+        this.dbConnection = dbConnection;
+        this.logFile = logFile;
+        this.verboseLogging = verboseLogging;
+        init(dbConnection, (Class<T>) ((ParameterizedType) getClass().getGenericSuperclass()).getActualTypeArguments()[0]);
     }
 
     public AbstractDatabaseManager(Connection con, Class<T> entityClass) {
         init(con, entityClass);
     }
 
+    public AbstractDatabaseManager(Connection con, TypeConverter... converters) {
+        for (TypeConverter converter : converters) {
+            Class<T> clazz = (Class<T>) ((ParameterizedType) converter.getClass().getGenericSuperclass()).getActualTypeArguments()[0];
+            TYPE_CONVERTERS.put(clazz, converter.getClass());
+        }
+
+        init(con, (Class<T>) ((ParameterizedType) getClass().getGenericSuperclass()).getActualTypeArguments()[0]);
+    }
+
+    public AbstractDatabaseManager(Connection con, File logFile, boolean verboseLogging, TypeConverter... converters) {
+
+        this.logFile = logFile;
+        this.verboseLogging = verboseLogging;
+
+        for (TypeConverter converter : converters) {
+            Class<T> clazz = (Class<T>) ((ParameterizedType) converter.getClass().getGenericSuperclass()).getActualTypeArguments()[0];
+            TYPE_CONVERTERS.put(clazz, converter.getClass());
+        }
+
+        init(con, (Class<T>) ((ParameterizedType) getClass().getGenericSuperclass()).getActualTypeArguments()[0]);
+    }
+
     private void init(Connection con, Class<T> entityClass) {
+
+        System.setProperty("java.util.logging.SimpleFormatter.format", "%1$tY-%1$tm-%1$td %1$tH:%1$tM:%1$tS.%1$tL %4$-7s [%3$s] (%2$s) %5$s %6$s%n");
+        logger = Logger.getLogger(this.getClass().getCanonicalName());
+
+        if (verboseLogging) {
+            ConsoleHandler handler = new ConsoleHandler();
+            handler.setLevel(Level.FINEST);
+            logger.setLevel(Level.FINEST);
+            logger.addHandler(handler);
+        }
+
+        if (logFile != null && logFile.exists()) {
+
+            try {
+                FileHandler fh = new FileHandler(logFile.getAbsolutePath());
+                SimpleFormatter formatter = new SimpleFormatter();
+                fh.setFormatter(formatter);
+                logger.addHandler(fh);
+            } catch (IOException | SecurityException ex) {
+                Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
+            }
+
+        }
+
         dbConnection = con;
 
         this.entityClass = entityClass;
@@ -108,11 +150,11 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
             this.tableName = tableNameAnno.toLowerCase();
         }
 
-        for (Class key : typeConverters.keySet()) {
-            log("Type Converter " + key.getCanonicalName());
+        for (Class key : TYPE_CONVERTERS.keySet()) {
+            logger.log(Level.INFO, "Type Converter {0}", key.getCanonicalName());
         }
-        for (String key : primitiveTypeConverters.keySet()) {
-            log("Primitive Type Converter " + key);
+        for (String key : PRIMITIVE_TYPE_CONVERTERS.keySet()) {
+            logger.log(Level.INFO, "Primitive Type Converter {0}", key);
         }
 
         if (dbConnection != null) {
@@ -134,60 +176,85 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
 
             if (!tableExists()) {
                 String query = getCreateQuery();
-                log("Creating table " + tableName + " using query: " + query);
+                logger.log(Level.INFO, "Creating table {0} using query: {1}", new Object[]{tableName, query});
 
-                Statement statement = getStatement();
-                statement.execute(query);
-                statement.close();
-                statement = null;
+                try (Statement statement = getStatement()) {
+                    if (statement != null) {
+                        statement.execute(query);
+                    } else {
+                        logger.info(NULL_STATEMENT_MSG);
+                    }
+                }
 
             } else {
 
                 //compare for changes
                 //load DB column info
-                Statement statement = getStatement();
-                ResultSet rs = statement.executeQuery("SHOW COLUMNS FROM " + tableName);
-                while (rs.next()) {
-                    Column col = new Column(rs);
-                    dbColumns.put(col.getName(), col);
-                    dbColumnNames.add(col.getName());
+                try (Statement statement = getStatement()) {
+                    if (statement != null) {
+                        try (ResultSet rs = statement.executeQuery("SHOW COLUMNS FROM " + tableName)) {
+                            while (rs.next()) {
+                                Column col = new Column(rs);
+                                dbColumns.put(col.getName(), col);
+                                dbColumnNames.add(col.getName());
+                            }
+                        }
+
+                    } else {
+                        logger.info("Null statement!");
+                    }
                 }
-                rs.close();
-                rs = null;
-                statement.close();
-                statement = null;
 
                 //load Entity column info
-                List<Field> fields = ReflectUtil.getAllFields(getNewInstanceOfEntity().getClass());
-                for (Field field : fields) {
+                T entityObj = getNewInstanceOfEntity();
 
-                    field.setAccessible(true);
-                    if (ReflectUtil.fieldIsOkForDatabase(field)) {
+                if (entityObj != null) {
 
-                        Column col = new Column(field, this);
-                        entityColumns.put(col.getName(), col);
+                    Class clazz = entityObj.getClass();
 
-                        fieldNames.add(ReflectUtil.getColumnName(field));
+                    if (clazz != null) {
 
-                        if (!dbColumnNames.contains(ReflectUtil.getColumnName(field))) {
-                            addedColumns.add(field);
+                        List<Field> fields = ReflectUtil.getAllFields(clazz);
+                        for (Field field : fields) {
+
+                            field.setAccessible(true);
+                            if (ReflectUtil.fieldIsOkForDatabase(field)) {
+
+                                Column col = new Column(field, this);
+                                entityColumns.put(col.getName(), col);
+
+                                fieldNames.add(ReflectUtil.getColumnName(field));
+
+                                if (!dbColumnNames.contains(ReflectUtil.getColumnName(field))) {
+                                    addedColumns.add(field);
+                                }
+                            }
+
                         }
+                    } else {
+                        logger.info("Null entity!");
                     }
-
+                } else {
+                    logger.info("Null entity!");
                 }
 
                 //add new columns
                 for (Field added : addedColumns) {
                     String addQuery = getAddColumnQuery(added);
                     if (addQuery != null && !addQuery.isEmpty()) {
-                        log("Add column query: " + addQuery);
+                        logger.log(Level.INFO, "Add column query: {0}", addQuery);
 
                         Column col = new Column(added, this);
                         dbColumns.put(col.getName(), col);
 
-                        statement = getStatement();
-                        statement.execute(addQuery);
-                        statement.close();
+                        try (Statement statement = getStatement()) {
+                            if (statement != null) {
+                                statement.execute(addQuery);
+
+                            } else {
+                                logger.info(NULL_STATEMENT_MSG);
+                            }
+                        }
 
                     }
                 }
@@ -201,10 +268,15 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
                 if (!removedColumns.isEmpty()) {
                     for (String col : removedColumns) {
                         String dropQuery = "ALTER TABLE `" + tableName + "` DROP COLUMN " + col + ";";
-                        log("Remove column query: " + dropQuery);
-                        statement = getStatement();
-                        statement.execute(dropQuery);
-                        statement.close();
+                        logger.log(Level.INFO, "Remove column query: {0}", dropQuery);
+                        try (Statement statement = getStatement()) {
+                            if (statement != null) {
+                                statement.execute(dropQuery);
+
+                            } else {
+                                logger.info(NULL_STATEMENT_MSG);
+                            }
+                        }
                         dbColumns.remove(col);
                     }
                 }
@@ -215,72 +287,92 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
                     Column entityColumn = entry.getValue();
                     Column dbColumn = dbColumns.get(columnName);
 
+                    logger.log(Level.INFO, dbColumn.toString());
+
                     if (!entityColumn.equals(dbColumn)) {
-                        log("Column changes for " + columnName);
-                        log("Entity\t " + entityColumn.toString());
-                        log("DB\t " + dbColumn.toString());
+                        logger.log(Level.INFO, "Changes for {0}", columnName);
+                        logger.log(Level.INFO, "Entity\t {0}", entityColumn);
+                        logger.log(Level.INFO, "DB\t {0}", dbColumn);
 
                         //remove unique key
                         if (dbColumn.isUnique() && !entityColumn.isUnique()) {
 
-                            log("Remove unique key for " + columnName);
+                            logger.log(Level.INFO, "Remove unique key for {0}", columnName);
 
-                            statement = getStatement();
-                            rs = statement.executeQuery("SHOW INDEX FROM `" + tableName + "` WHERE Column_name = '" + dbColumn.getName() + "'");
-                            while (rs.next()) {
-                                String name = rs.getString("Key_name");
-                                Statement dStatement = getStatement();
-                                dStatement.execute("ALTER TABLE `" + tableName + "` DROP INDEX `" + name + "`");
-                                dStatement.close();
-                                dStatement = null;
+                            try (Statement statement = getStatement()) {
+                                if (statement != null) {
+                                    try (ResultSet rs = statement.executeQuery("SHOW INDEX FROM `" + tableName + "` WHERE Column_name = '" + dbColumn.getName() + "'")) {
+                                        while (rs.next()) {
+                                            String name = rs.getString("Key_name");
+                                            try (Statement dStatement = getStatement()) {
+                                                if (dStatement != null) {
+                                                    dStatement.execute("ALTER TABLE `" + tableName + "` DROP INDEX `" + name + "`");
+                                                } else {
+                                                    logger.info(NULL_STATEMENT_MSG);
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                } else {
+                                    logger.info(NULL_STATEMENT_MSG);
+                                }
                             }
-                            rs.close();
-                            rs = null;
-                            statement.close();
-                            statement = null;
                         } //add unique key
                         else if (!dbColumn.isUnique() && entityColumn.isUnique()) {
-                            log("Add unique key for " + columnName);
-                            Statement dStatement = getStatement();
-                            dStatement.execute("ALTER TABLE `" + tableName + "` ADD UNIQUE (" + entityColumn.getName() + ")");
-                            dStatement.close();
-                            dStatement = null;
+                            logger.log(Level.INFO, "Add unique key for {0}", columnName);
+                            try (Statement dStatement = getStatement()) {
+                                if (dStatement != null) {
+                                    dStatement.execute("ALTER TABLE `" + tableName + "` ADD UNIQUE (" + entityColumn.getName() + ")");
+                                } else {
+                                    logger.info(NULL_STATEMENT_MSG);
+                                }
+                            }
                         }
 
                         //remove nullable
                         if (!dbColumn.isNullable() && entityColumn.isNullable()) {
 
-                            Statement dStatement = getStatement();
-                            String q = "ALTER TABLE `" + tableName + "` MODIFY COLUMN " + entityColumn.getName() + " " + entityColumn.getType() + "(" + entityColumn.getSize() + ")";
-                            log("Remove nullable for " + columnName + " query=" + q);
-                            dStatement.execute(q);
-                            dStatement.close();
-                            dStatement = null;
+                            try (Statement dStatement = getStatement()) {
+                                if (dStatement != null) {
+                                    String q = "ALTER TABLE `" + tableName + "` MODIFY COLUMN " + entityColumn.getName() + " " + entityColumn.getType() + "(" + entityColumn.getSize() + ")";
+                                    logger.log(Level.INFO, "Remove nullable for {0} query={1}", new Object[]{columnName, q});
+                                    dStatement.execute(q);
+                                } else {
+                                    logger.info(NULL_STATEMENT_MSG);
+                                }
+                            }
                         } //add nullable
                         else if (dbColumn.isNullable() && !entityColumn.isNullable()) {
 
-                            Statement dStatement = getStatement();
-                            String q = "ALTER TABLE `" + tableName + "` MODIFY COLUMN " + entityColumn.getName() + " " + entityColumn.getType() + "(" + entityColumn.getSize() + ") null";
-                            log("Add nullable for " + columnName + " query=" + q);
-                            dStatement.execute(q);
-                            dStatement.close();
-                            dStatement = null;
+                            try (Statement dStatement = getStatement()) {
+                                if (dStatement != null) {
+                                    String q = "ALTER TABLE `" + tableName + "` MODIFY COLUMN " + entityColumn.getName() + " " + entityColumn.getType() + "(" + entityColumn.getSize() + ") null";
+                                    logger.log(Level.INFO, "Add nullable for {0} query={1}", new Object[]{columnName, q});
+                                    dStatement.execute(q);
+                                } else {
+                                    logger.info(NULL_STATEMENT_MSG);
+                                }
+                            }
                         }
 
                         //change size
                         if (dbColumn.getSize() != entityColumn.getSize()) {
 
-                            Statement dStatement = getStatement();
-                            String q = "ALTER TABLE `" + tableName + "` CHANGE COLUMN `" + entityColumn.getName() + "` `" + entityColumn.getName() + "` " + entityColumn.getType() + " (" + entityColumn.getSize() + ")";
+                            try (Statement dStatement = getStatement()) {
+                                if (dStatement != null) {
+                                    StringBuilder builder = new StringBuilder("ALTER TABLE `" + tableName + "` CHANGE COLUMN `" + entityColumn.getName() + "` `" + entityColumn.getName() + "` " + entityColumn.getType() + " (" + entityColumn.getSize() + ")");
 
-                            if (entityColumn.isNullable()) {
-                                q += " null";
+                                    if (entityColumn.isNullable()) {
+                                        builder.append(" null");
+                                    }
+
+                                    logger.log(Level.INFO, "Change size for {0} query={1}", new Object[]{columnName, builder.toString()});
+                                    dStatement.execute(builder.toString());
+                                } else {
+                                    logger.info(NULL_STATEMENT_MSG);
+                                }
                             }
-
-                            log("Change size for " + columnName + " query=" + q);
-                            dStatement.execute(q);
-                            dStatement.close();
-                            dStatement = null;
 
                         }
 
@@ -291,7 +383,7 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
             }
 
         } catch (SQLException ex) {
-            Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
+            logger.log(Level.SEVERE, null, ex);
         }
 
     }
@@ -300,34 +392,32 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
 
         try {
             String query = "SHOW TABLES FROM " + dbConnection.getCatalog() + " LIKE '" + tableName + "';";
-            Statement statement = getStatement();
-            ResultSet rs = statement.executeQuery(query);
-
-            if (rs.next()) {
-                rs.close();
-                rs = null;
-                statement.close();
-                statement = null;
-                log("Table " + tableName + " exists.");
-                return true;
+            try (Statement statement = getStatement()) {
+                if (statement != null) {
+                    try (ResultSet rs = statement.executeQuery(query)) {
+                        if (rs != null && rs.next()) {
+                            logger.log(Level.INFO, "Table {0} exists.", tableName);
+                            return true;
+                        }
+                    }
+                } else {
+                    logger.info(NULL_STATEMENT_MSG);
+                }
             }
-
         } catch (SQLException ex) {
-            Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
+            logger.log(Level.SEVERE, null, ex);
         }
-        log("Table " + tableName + " does not exists.");
+        logger.log(Level.INFO, "Table {0} does not exists.", tableName);
         return false;
     }
 
     private String getAddColumnQuery(Field field) {
-        String fieldQuery = "";
+        StringBuilder fieldQueryBuilder = new StringBuilder();
         List<String> pks = new ArrayList<>();
         try {
             field.setAccessible(true);
 
             if (ReflectUtil.fieldIsOkForDatabase(field)) {
-
-                Class<?> type = field.getType();
 
                 // attribute order matters in create query, so load
                 // annotations, then add to query in particular order
@@ -352,146 +442,146 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
                     size = ReflectUtil.getSize(field);
                 }
 
-                fieldQuery += "ALTER TABLE " + tableName + " ADD COLUMN `" + ReflectUtil.getColumnName(field) + "` ";
-
-                fieldQuery += getColumnType(field);
+                fieldQueryBuilder.append("ALTER TABLE ").append(tableName).append(" ADD COLUMN `").append(ReflectUtil.getColumnName(field)).append("` ");
+                fieldQueryBuilder.append(getColumnType(field));
 
                 if (size != -1) {
-                    fieldQuery += "(" + size + ")";
+                    fieldQueryBuilder.append("(").append(size).append(")");
                 }
 
                 if (notNull) {
-                    fieldQuery += " NOT NULL ";
+                    fieldQueryBuilder.append(" NOT NULL ");
                 }
                 if (primaryKey) {
                     pks.add(ReflectUtil.getColumnName(field));
                 }
                 if (autoIncrement) {
-                    fieldQuery += " AUTO_INCREMENT ";
+                    fieldQueryBuilder.append(" AUTO_INCREMENT ");
                 }
                 if (unique) {
-                    fieldQuery += " UNIQUE ";
+                    fieldQueryBuilder.append(" UNIQUE ");
                 }
 
                 if (!pks.isEmpty()) {
-                    fieldQuery += ", DROP PRIMARY KEY, ADD PRIMARY KEY(" + getCommaList(pks) + ")";
+                    fieldQueryBuilder.append(", DROP PRIMARY KEY, ADD PRIMARY KEY(").append(getCommaList(pks)).append(")");
                 }
 
             }
 
-        } catch (Exception e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
+        } catch (SecurityException e) {
+            logger.log(Level.SEVERE, null, e);
         }
-        return fieldQuery;
+        return fieldQueryBuilder.toString();
     }
 
     private String getCreateQuery() {
 
-        String query = "CREATE TABLE " + tableName + "(";
+        StringBuilder queryBuilder = new StringBuilder("CREATE TABLE " + tableName + "(");
 
-        List<Field> fields = ReflectUtil.getAllFields(getNewInstanceOfEntity().getClass());
+        T obj = getNewInstanceOfEntity();
+        if (obj != null) {
+            Class clazz = obj.getClass();
+            if (clazz != null) {
+                List<Field> fields = ReflectUtil.getAllFields(clazz);
 
-        Collections.sort(fields, new Comparator<Field>() {
-            @Override
-            public int compare(Field f1, Field f2) {
-                return f1.getName().compareTo(f2.getName());
-            }
-        });
+                Collections.sort(fields, new Comparator<Field>() {
+                    @Override
+                    public int compare(Field f1, Field f2) {
+                        return f1.getName().compareTo(f2.getName());
+                    }
+                });
 
-        for (Field field : fields) {
-            log("Field for create: " + field.getName());
-        }
+                for (Field field : fields) {
+                    logger.log(Level.FINE, "Field for create: {0}", field.getName());
+                }
 
-        List<String> fieldQueries = new ArrayList<>();
-        List<String> pks = new ArrayList<>();
+                List<String> fieldQueries = new ArrayList<>();
+                List<String> pks = new ArrayList<>();
 
-        for (Field field : fields) {
+                for (Field field : fields) {
 
-            try {
-                field.setAccessible(true);
+                    try {
+                        field.setAccessible(true);
 
-                if (ReflectUtil.fieldIsOkForDatabase(field)) {
-                    String fieldQuery = "";
-                    Class<?> type = field.getType();
+                        if (ReflectUtil.fieldIsOkForDatabase(field)) {
+                            StringBuilder fieldQueryBuilder = new StringBuilder();
 
-                    // attribute order matters in create query, so load
-                    // annotations, then add to query in particular order
-                    boolean primaryKey = false;
-                    boolean autoIncrement = false;
-                    boolean notNull = false;
-                    boolean unique = false;
-                    int size = -1;
-                    for (Annotation anno : field.getAnnotations()) {
-                        if (anno instanceof DbPrimaryKey) {
-                            primaryKey = true;
-                        } else if (anno instanceof DbAutoIncrement) {
-                            autoIncrement = true;
-                        } else if (anno instanceof DbNotNull) {
-                            notNull = true;
-                        } else if (anno instanceof DbUnique) {
-                            unique = true;
+                            // attribute order matters in create query, so load
+                            // annotations, then add to query in particular order
+                            boolean primaryKey = false;
+                            boolean autoIncrement = false;
+                            boolean notNull = false;
+                            boolean unique = false;
+                            int size = -1;
+                            for (Annotation anno : field.getAnnotations()) {
+                                if (anno instanceof DbPrimaryKey) {
+                                    primaryKey = true;
+                                } else if (anno instanceof DbAutoIncrement) {
+                                    autoIncrement = true;
+                                } else if (anno instanceof DbNotNull) {
+                                    notNull = true;
+                                } else if (anno instanceof DbUnique) {
+                                    unique = true;
+                                }
+                            }
+
+                            if (field.isAnnotationPresent(DbSize.class)) {
+                                size = ReflectUtil.getSize(field);
+                            }
+
+                            fieldQueryBuilder.append(ReflectUtil.getColumnName(field)).append(" ");
+                            String dbType = getColumnType(field);
+                            fieldQueryBuilder.append(dbType);
+
+                            if (size != -1) {
+                                fieldQueryBuilder.append("(" + size + ")");
+                            } else if (dbType.equals(MySQLTypeConverter.DB_TYPE_INTEGER)) {
+                                fieldQueryBuilder.append("(" + MySQLTypeConverter.DB_DEFAULT_INT_SIZE + ")");
+                            }
+
+                            if (notNull) {
+                                fieldQueryBuilder.append(" NOT NULL ");
+                            }
+                            if (primaryKey) {
+                                pks.add(ReflectUtil.getColumnName(field));
+                            }
+                            if (autoIncrement) {
+                                fieldQueryBuilder.append(" AUTO_INCREMENT ");
+                            }
+                            if (unique) {
+                                fieldQueryBuilder.append(" UNIQUE ");
+                            }
+
+                            fieldQueries.add(fieldQueryBuilder.toString());
+
                         }
-                    }
 
-                    if (field.isAnnotationPresent(DbSize.class)) {
-                        size = ReflectUtil.getSize(field);
+                    } catch (SecurityException e) {
+                        logger.log(Level.SEVERE, null, e);
                     }
-
-                    fieldQuery += ReflectUtil.getColumnName(field) + " ";
-                    String dbType = "";
-
-                    dbType = getColumnType(field);
-                    fieldQuery += dbType;
-
-                    if (size != -1) {
-                        fieldQuery += "(" + size + ")";
-                    } else if (dbType.equals(MySQLTypeConverter.DB_TYPE_INTEGER)) {
-                        fieldQuery += "(" + MySQLTypeConverter.DB_DEFAULT_INT_SIZE + ")";
-                    }
-
-                    if (notNull) {
-                        fieldQuery += " NOT NULL ";
-                    }
-                    if (primaryKey) {
-                        pks.add(ReflectUtil.getColumnName(field));
-                    }
-                    if (autoIncrement) {
-                        fieldQuery += " AUTO_INCREMENT ";
-                    }
-                    if (unique) {
-                        fieldQuery += " UNIQUE ";
-                    }
-
-                    fieldQueries.add(fieldQuery);
 
                 }
 
-            } catch (Exception e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
+                int totalFieldCount = fieldQueries.size();
+                int fieldCount = 1;
+
+                for (String fieldQuery : fieldQueries) {
+                    queryBuilder.append(fieldQuery);
+                    if (fieldCount != totalFieldCount) {
+                        queryBuilder.append(", ");
+                    }
+                    fieldCount++;
+                }
+
+                if (!pks.isEmpty()) {
+                    queryBuilder.append(", PRIMARY KEY (").append(getCommaList(pks)).append(")");
+                }
+
+                queryBuilder.append(");");
             }
-
         }
 
-        int totalFieldCount = fieldQueries.size();
-        int fieldCount = 1;
-
-        for (String fieldQuery : fieldQueries) {
-            query += fieldQuery;
-            if (fieldCount != totalFieldCount) {
-                query += ", ";
-            }
-            fieldCount++;
-        }
-
-        if (!pks.isEmpty()) {
-            query += ", PRIMARY KEY (" + getCommaList(pks) + ")";
-        }
-
-        query += ");";
-
-        return query;
+        return queryBuilder.toString();
     }
 
     public void close() {
@@ -499,24 +589,24 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
 
     protected final Statement getStatement() {
         try {
-            return (Statement) dbConnection.createStatement();
+            return dbConnection.createStatement();
         } catch (SQLException ex) {
-            Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
+            logger.log(Level.SEVERE, null, ex);
             return null;
         }
     }
 
     private String getCommaList(List<String> list) {
-        String str = "";
+        StringBuilder builder = new StringBuilder();
         int itemCount = 1;
         for (String item : list) {
-            str += item;
+            builder.append(item);
             if (itemCount != list.size()) {
-                str += ", ";
+                builder.append(", ");
             }
             itemCount++;
         }
-        return str;
+        return builder.toString();
     }
 
     /**
@@ -527,35 +617,40 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
      */
     public boolean save(T entity) {
 
-        if (entity.isPersisted()) {//|| entity.getId() != Entity.INVALID_ID) {
-            update(entity);
-            return true;
-        } else {
-            insert(entity);
-            return true;
+        if (entity != null) {
+            if (entity.isPersisted()) {
+                update(entity);
+                return true;
+            } else {
+                insert(entity);
+                return true;
+            }
         }
+        logger.severe("Trying to save null entity");
+        return false;
 
     }
 
     private String getEscapedField(Object value) {
-        if (value instanceof String) {
-            return "\"" + value + "\"";
-        } else if (value instanceof Boolean || value instanceof Integer || value instanceof Long || value instanceof Double || value instanceof Float) {
-            return value + "";
-        } else {
-            return "\"" + value + "\"";
+        if (value != null) {
+            if (value instanceof String) {
+                return "\"" + value + "\"";
+            } else if (value instanceof Boolean || value instanceof Integer || value instanceof Long || value instanceof Double || value instanceof Float) {
+                return value + "";
+            } else {
+                return "\"" + value + "\"";
+            }
         }
+        logger.severe("Trying to escape null entity");
+        return null;
     }
 
     public boolean insert(T entity) {
 
-        ResultSet rs = null;
-        Statement statement = null;
-
         HashMap<String, Object> cv = getData(entity);
         if (cv.size() > 0) {
             try {
-                String insertQuery = "INSERT INTO " + tableName + "(";
+                StringBuilder insertQueryBuilder = new StringBuilder("INSERT INTO " + tableName + "(");
 
                 List<String> values = new ArrayList<>();
                 List<String> columns = new ArrayList<>();
@@ -567,56 +662,33 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
                     values.add(getEscapedField(value));
                 }
 
-                insertQuery += getCommaList(columns) + ") VALUES (";
-                insertQuery += getCommaList(values) + ");";
-                if (debug) {
-                    log("Insert query: " + insertQuery);
-                }
+                insertQueryBuilder.append(getCommaList(columns)).append(") VALUES (");
+                insertQueryBuilder.append(getCommaList(values)).append(");");
+                logger.log(Level.FINE, "Insert query: {0}", insertQueryBuilder);
 
-                statement = getStatement();
-                statement.execute(insertQuery);
-                statement.close();
+                String[] generatedColumns = {"id"};
+                try (PreparedStatement statement = dbConnection.prepareStatement(insertQueryBuilder.toString(), generatedColumns)) {
+                    if (statement != null) {
+                        int affectedRows = statement.executeUpdate();
 
-                //grab last id
-                //TODO this is sketchy
-                statement = getStatement();
-                rs = statement.executeQuery("select last_insert_id() as last_id from " + tableName);
+                        if (affectedRows > 0) {
 
-                if (rs.next()) {
-                    int rowId = Integer.parseInt(rs.getString("last_id"));
+                            try (ResultSet generatedKeys = statement.getGeneratedKeys()) {
+                                if (generatedKeys.next()) {
+                                    entity.setId(generatedKeys.getLong(1));
+                                } else {
+                                    throw new SQLException("Creating user failed, no ID obtained.");
+                                }
+                            }
 
-                    if (rowId != -1) {
-                        entity.setId(rowId);
-                        entity.setPersisted(true);
-                        rs.close();
-                        rs = null;
-
-                        statement.close();
-                        statement = null;
-
-                        return true;
+                        }
+                    } else {
+                        logger.severe(NULL_STATEMENT_MSG);
                     }
                 }
 
             } catch (SQLException ex) {
-                Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-            } finally {
-                if (rs != null) {
-                    try {
-                        rs.close();
-                        rs = null;
-                    } catch (SQLException ex) {
-                        Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                    }
-                }
-                if (statement != null) {
-                    try {
-                        statement.close();
-                        statement = null;
-                    } catch (SQLException ex) {
-                        Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                    }
-                }
+                logger.log(Level.SEVERE, null, ex);
             }
         }
 
@@ -625,11 +697,10 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
 
     public boolean update(T entity) {
 
-        Statement statement = null;
         HashMap<String, Object> cv = getData(entity);
         if (cv.size() > 0) {
             try {
-                String query = "UPDATE " + tableName + " ";
+                StringBuilder query = new StringBuilder("UPDATE " + tableName + " ");
 
                 List<String> updates = new ArrayList<>();
 
@@ -639,67 +710,51 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
                     updates.add(" " + key + " = " + getEscapedField(value) + " ");
                 }
 
-                query += "SET " + getCommaList(updates) + " WHERE id = " + entity.getId();
+                query.append("SET ").append(getCommaList(updates)).append(" WHERE id = ").append(entity.getId());
 
-                if (debug) {
-                    log("Update query: " + query);
-                }
+                logger.log(Level.FINE, "Update query: {0}", query);
 
-                statement = getStatement();
-                statement.execute(query);
-                statement.close();
-                statement = null;
+                try (Statement statement = getStatement()) {
+                    if (statement != null) {
+                        statement.execute(query.toString());
 
-                return true;
-            } catch (Exception e) {
-                e.printStackTrace();
-                return false;
-            } finally {
-                if (statement != null) {
-                    try {
-                        statement.close();
-                        statement = null;
-                    } catch (SQLException ex) {
-                        Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
+                        return true;
+                    } else {
+                        logger.severe(NULL_STATEMENT_MSG);
                     }
                 }
+
+            } catch (SQLException ex) {
+                logger.log(Level.SEVERE, null, ex);
+                return false;
             }
         }
         return false;
     }
 
     public boolean delete(T entity) {
-        Statement statement = null;
+
         HashMap cv = getData(entity);
         if (cv.size() > 0) {
 
             try {
                 String query = "DELETE FROM " + tableName + " WHERE id = " + entity.getId();
 
-                if (debug) {
-                    log("Delete query: " + query);
+                logger.log(Level.FINE, "Delete query: {0}", query);
+
+                try (Statement statement = getStatement()) {
+                    if (statement != null) {
+                        statement.execute(query);
+
+                    } else {
+                        logger.severe(NULL_STATEMENT_MSG);
+                    }
                 }
-
-                statement = getStatement();
-                statement.execute(query);
-
-                statement.close();
-                statement = null;
 
                 return true;
             } catch (SQLException ex) {
-                ex.printStackTrace();
+                logger.log(Level.SEVERE, "Delete failure", ex);
                 return false;
-            } finally {
-
-                if (statement != null) {
-                    try {
-                        statement.close();
-                        statement = null;
-                    } catch (SQLException ex) {
-                        Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                    }
-                }
             }
 
         }
@@ -707,47 +762,27 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
     }
 
     public T read(int id) {
-        ResultSet rs = null;
-        Statement statement = null;
         try {
             String query = "SELECT * FROM " + tableName + " WHERE id  = " + id;
 
-            if (debug) {
-                log("Read query: " + query);
-            }
+            logger.log(Level.FINE, "Read query: {0}", query);
 
-            statement = getStatement();
-            rs = statement.executeQuery(query);
-
-            if (rs.next()) {
-                T obj = (T) setData(rs, getNewInstanceOfEntity());;
-                rs.close();
-                rs = null;
-                statement.close();
-                statement = null;
-                return obj;
+            try (Statement statement = getStatement()) {
+                if (statement != null) {
+                    try (ResultSet rs = statement.executeQuery(query)) {
+                        if (rs.next()) {
+                            T obj = setData(rs, getNewInstanceOfEntity());;
+                            return obj;
+                        }
+                    }
+                } else {
+                    logger.severe(NULL_STATEMENT_MSG);
+                }
             }
             return null;
         } catch (SQLException ex) {
-            Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
+            logger.log(Level.SEVERE, null, ex);
             return null;
-        } finally {
-            if (rs != null) {
-                try {
-                    rs.close();
-                    rs = null;
-                } catch (SQLException ex) {
-                    Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                }
-                if (statement != null) {
-                    try {
-                        statement.close();
-                        statement = null;
-                    } catch (SQLException ex) {
-                        Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                    }
-                }
-            }
         }
     }
 
@@ -761,70 +796,51 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
 
         List<T> list = new ArrayList<>();
 
-        String query = "SELECT * FROM " + tableName;
+        StringBuilder query = new StringBuilder("SELECT * FROM " + tableName);
 
         if (!args.getArgs().isEmpty()) {
-            query += " WHERE ";
+            query.append(" WHERE ");
 
             int argCount = 1;
             for (Map.Entry<String, Object> entry : args.getArgs().entrySet()) {
                 String key = entry.getKey();
                 Object value = entry.getValue();
 
-                query += key + " = " + getEscapedField(value) + " ";
+                query.append(key).append(" = ").append(getEscapedField(value)).append(" ");
 
                 if (argCount != args.getArgs().size()) {
-                    query += " AND ";
+                    query.append(" AND ");
                 }
                 argCount++;
             }
 
         }
-        if (debug) {
-            log("listWhereArgsEquals query: " + query);
-        }
+        logger.log(Level.FINE, "listWhereArgsEquals query: {0}", query);
 
-        Statement statement = getStatement();
-        ResultSet rs = null;
         try {
-            rs = statement.executeQuery(query);
-            while (rs.next()) {
-                //System.out.println("next RS:" + rs.toString());
-                list.add(setData(rs, getNewInstanceOfEntity()));
-            }
-            rs.close();
-            rs = null;
-            statement.close();
-            statement = null;
-            return list;
-        } catch (SQLException ex) {
-            Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-            return null;
-        } finally {
-            if (rs != null) {
-                try {
-                    rs.close();
-                    rs = null;
-                } catch (SQLException ex) {
-                    Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                }
-            }
-            if (statement != null) {
-                try {
-                    statement.close();
-                    statement = null;
-                } catch (SQLException ex) {
-                    Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                }
-            }
-        }
 
+            try (Statement statement = getStatement()) {
+                if (statement != null) {
+                    try (ResultSet rs = statement.executeQuery(query.toString())) {
+                        while (rs != null && rs.next()) {
+                            list.add(setData(rs, getNewInstanceOfEntity()));
+                        }
+                    }
+
+                } else {
+                    logger.severe(NULL_STATEMENT_MSG);
+                }
+            }
+        } catch (SQLException ex) {
+            logger.log(Level.SEVERE, null, ex);
+        }
+        return list;
     }
 
     private T getNewInstanceOfEntity() {
         try {
-            return (T) entityClass.newInstance();
-        } catch (Exception e) {
+            return entityClass.newInstance();
+        } catch (IllegalAccessException | InstantiationException e) {
             return null;
         }
     }
@@ -847,131 +863,86 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
      */
     public List<T> list(String query) {
         List<T> list = new ArrayList<>();
-        ResultSet rs = null;
-        Statement statement = getStatement();
+
         try {
-            rs = statement.executeQuery(query);
+            try (Statement statement = getStatement()) {
+                if (statement != null) {
+                    try (ResultSet rs = statement.executeQuery(query)) {
+                        while (rs != null && rs.next()) {
+                            list.add(setData(rs, getNewInstanceOfEntity()));
+                        }
+                    }
 
-            while (rs.next()) {
-                list.add(setData(rs, getNewInstanceOfEntity()));
+                } else {
+                    logger.severe(NULL_STATEMENT_MSG);
+                }
             }
-            rs.close();
-            rs = null;
 
-            statement.close();
-            statement = null;
-
-            return list;
         } catch (SQLException ex) {
-            Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-            return null;
-        } finally {
-            if (rs != null) {
-                try {
-                    rs.close();
-                    rs = null;
-                } catch (SQLException ex) {
-                    Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                }
-            }
-            if (statement != null) {
-                try {
-                    statement.close();
-                    statement = null;
-                } catch (SQLException ex) {
-                    Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                }
-            }
+            logger.log(Level.SEVERE, null, ex);
         }
+        return list;
+
     }
 
     public int count() {
-        Statement statement = getStatement();
-        ResultSet resultSet = null;
+
         try {
 
-            String cntField = "id";
-            if (ReflectUtil.noID(entityClass)) {
-                cntField = "*";
-            }
+            try (Statement statement = getStatement()) {
+                if (statement != null) {
+                    String cntField = "id";
+                    if (ReflectUtil.noID(entityClass)) {
+                        cntField = "*";
+                    }
 
-            String query = "SELECT count(" + cntField + ") FROM " + tableName;
+                    String query = "SELECT count(" + cntField + ") FROM " + tableName;
 
-            if (debug) {
-                log("Count query: " + query);
-            }
+                    logger.log(Level.FINE, "Count query: {0}", query);
 
-            resultSet = statement.executeQuery(query);
-
-            while (resultSet.next()) {
-                int count = resultSet.getInt(1);
-                resultSet.close();
-                statement.close();
-                statement = null;
-                return count;
+                    try (ResultSet resultSet = statement.executeQuery(query)) {
+                        if (resultSet != null) {
+                            while (resultSet.next()) {
+                                return resultSet.getInt(1);
+                            }
+                        }
+                    }
+                } else {
+                    logger.severe(NULL_STATEMENT_MSG);
+                }
             }
 
         } catch (SQLException ex) {
-            Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-        } finally {
-            if (resultSet != null) {
-                try {
-                    resultSet.close();
-                } catch (SQLException ex) {
-                    Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                }
-            }
-            if (statement != null) {
-                try {
-                    statement.close();
-                    statement = null;
-                } catch (SQLException ex) {
-                    Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                }
-            }
+            logger.log(Level.SEVERE, null, ex);
         }
         return 0;
     }
 
     public int count(String whereClause) {
-        ResultSet resultSet = null;
-        Statement statement = getStatement();
+
         try {
-            String query = "SELECT count(id) FROM " + tableName + " WHERE " + whereClause;
 
-            if (debug) {
-                log("Count query: " + query);
-            }
+            try (Statement statement = getStatement()) {
+                if (statement != null) {
+                    String query = "SELECT count(id) FROM " + tableName + " WHERE " + whereClause;
 
-            resultSet = getStatement().executeQuery(query);
-            resultSet = statement.executeQuery(query);
-            statement.close();
-            statement = null;
+                    logger.log(Level.FINE, "Count query: {0}", query);
 
-            while (resultSet.next()) {
-                int count = resultSet.getInt(1);
-                resultSet.close();
-                return count;
+                    try (ResultSet resultSet = statement.executeQuery(query)) {
+                        if (resultSet != null) {
+                            while (resultSet.next()) {
+                                return resultSet.getInt(1);
+                            }
+                        }
+                    }
+
+                } else {
+                    logger.severe(NULL_STATEMENT_MSG);
+                }
             }
 
         } catch (SQLException ex) {
-            Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-        } finally {
-            if (resultSet != null) {
-                try {
-                    resultSet.close();
-                } catch (SQLException ex) {
-                    Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                }
-            }
-            if (statement != null) {
-                try {
-                    statement.close();
-                    statement = null;
-                } catch (SQLException ex) {
-                    Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-                }
-            }
+            logger.log(Level.SEVERE, null, ex);
         }
         return 0;
     }
@@ -979,48 +950,44 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
     private HashMap getData(T entity) {
         HashMap cv = new HashMap();
 
-        List<Field> fields = ReflectUtil.getAllFields(entity.getClass());
-        for (Field field : fields) {
+        if (entity != null) {
+            List<Field> fields = ReflectUtil.getAllFields(entity.getClass());
+            for (Field field : fields) {
 
-            try {
-                field.setAccessible(true);
+                try {
+                    field.setAccessible(true);
 
-                if (!ReflectUtil.containsIgnore(field)) {
+                    if (!ReflectUtil.containsIgnore(field)) {
 
-                    Class<?> type = field.getType();
-                    String columnName = ReflectUtil.getColumnName(field);
+                        Class<?> type = field.getType();
+                        String columnName = ReflectUtil.getColumnName(field);
 
-                    if (field.isAnnotationPresent(DbPrimaryKey.class) && ReflectUtil.noID(entity.getClass())) {
-                        log("Entity has no ID annotation");
-                    } else if (typeConverters.containsKey(type)) {
-                        Class<?> converterClazz = typeConverters.get(type);
-                        log(field.getName() + " using type converter: " + converterClazz.getCanonicalName());
-                        AbstractTypeConverter converter = (AbstractTypeConverter) Class.forName(converterClazz.getCanonicalName()).newInstance();
-                        Object obj = converter.getDatabaseValue(entity, field.getName());
-                        log(field.getName() + " value is "+ converter.getDatabaseValue(entity, field.getName()));
-                        putValue(cv, columnName, obj);
-                    } else if (primitiveTypeConverters.containsKey(type.getName())) {
-                        Class<?> converterClazz = primitiveTypeConverters.get(type.getName());
-                        log(field.getName() + " using primitive type converter: " + converterClazz.getCanonicalName());
-                        AbstractTypeConverter converter = (AbstractTypeConverter) Class.forName(converterClazz.getCanonicalName()).newInstance();
-                        putValue(cv, columnName, converter.getDatabaseValue(entity, field.getName()));
-                    } else {
-                        log("Unknown type " + type.getName() + " when getting data for field '" + field.getName() + "'.");
+                        if (field.isAnnotationPresent(DbPrimaryKey.class) && ReflectUtil.noID(entity.getClass())) {
+                            logger.finer("Entity has no ID annotation");
+                        } else if (TYPE_CONVERTERS.containsKey(type)) {
+                            Class<?> converterClazz = TYPE_CONVERTERS.get(type);
+                            logger.log(Level.FINER, "{0} using type converter: {1}", new Object[]{field.getName(), converterClazz.getCanonicalName()});
+                            AbstractTypeConverter converter = (AbstractTypeConverter) Class.forName(converterClazz.getCanonicalName()).newInstance();
+                            Object obj = converter.getDatabaseValue(entity, field.getName());
+                            logger.log(Level.FINER, "{0} value is {1}", new Object[]{field.getName(), converter.getDatabaseValue(entity, field.getName())});
+                            putValue(cv, columnName, obj);
+                        } else if (PRIMITIVE_TYPE_CONVERTERS.containsKey(type.getName())) {
+                            Class<?> converterClazz = PRIMITIVE_TYPE_CONVERTERS.get(type.getName());
+                            logger.log(Level.FINER, "{0} using primitive type converter: {1}", new Object[]{field.getName(), converterClazz.getCanonicalName()});
+                            AbstractTypeConverter converter = (AbstractTypeConverter) Class.forName(converterClazz.getCanonicalName()).newInstance();
+                            putValue(cv, columnName, converter.getDatabaseValue(entity, field.getName()));
+                        } else {
+                            logger.log(Level.FINER, "Unknown type {0} when getting data for field ''{1}''.", new Object[]{type.getName(), field.getName()});
+                        }
                     }
+
+                } catch (IllegalAccessException | IllegalArgumentException | ClassNotFoundException | InstantiationException ex) {
+                    logger.log(Level.SEVERE, null, ex);
                 }
 
-            } catch (IllegalAccessException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            } catch (IllegalArgumentException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            } catch (ClassNotFoundException ex) {
-                Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-            } catch (InstantiationException ex) {
-                Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
             }
-
+        } else {
+            logger.severe("Trying to get data from null entity");
         }
 
         return cv;
@@ -1028,68 +995,70 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
 
     private T setData(ResultSet resultSet, T entityClassObject) {
 
-        //System.out.println("setData RS:" + resultSet.toString());
-        List<Field> fields = ReflectUtil.getAllFields(entityClassObject.getClass());
-        for (Field field : fields) {
+        if (entityClassObject != null) {
+            List<Field> fields = ReflectUtil.getAllFields(entityClassObject.getClass());
+            for (Field field : fields) {
 
-            try {
-                field.setAccessible(true);
+                try {
+                    field.setAccessible(true);
 
-                String columnName = ReflectUtil.getColumnName(field);
+                    String columnName = ReflectUtil.getColumnName(field);
 
-                // set entity as persisted when read
-                if (field.getName().equals("persisted")) {
-                    field.set(entityClassObject, true);
-                }
-
-                if (field.isAnnotationPresent(DbPrimaryKey.class) && ReflectUtil.noID(entityClassObject.getClass())) {
-                    log("Entity has no ID annotation");
-                } else if (!ReflectUtil.containsIgnore(field)) {
-                    Class<?> type = field.getType();
-
-                    if (typeConverters.containsKey(type)) {
-                        Class<?> converterClazz = typeConverters.get(type);
-                        log(field.getName() + " using type converter: " + converterClazz.getCanonicalName());
-                        AbstractTypeConverter converter = (AbstractTypeConverter) Class.forName(converterClazz.getCanonicalName()).newInstance();
-                        field.set(entityClassObject, converter.getValue(resultSet, columnName));
-                    } else if (primitiveTypeConverters.containsKey(type.getName())) {
-                        Class<?> converterClazz = primitiveTypeConverters.get(type.getName());
-                        log(field.getName() + " using primitive type converter: " + converterClazz.getCanonicalName());
-                        AbstractTypeConverter converter = (AbstractTypeConverter) Class.forName(converterClazz.getCanonicalName()).newInstance();
-                        field.set(entityClassObject, converter.getValue(resultSet, columnName));
-                    } else {
-                        log("Unknown type " + type.getName() + " when setting data for field '" + field.getName() + "'.");
+                    // set entity as persisted when read
+                    if (field.getName().equals("persisted")) {
+                        field.set(entityClassObject, true);
                     }
-                }
 
-            } catch (IllegalAccessException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            } catch (IllegalArgumentException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            } catch (Exception e) {
-                e.printStackTrace();
+                    if (field.isAnnotationPresent(DbPrimaryKey.class) && ReflectUtil.noID(entityClassObject.getClass())) {
+                        logger.fine("Entity has no ID annotation");
+                    } else if (!ReflectUtil.containsIgnore(field)) {
+                        Class<?> type = field.getType();
+
+                        if (TYPE_CONVERTERS.containsKey(type)) {
+                            Class<?> converterClazz = TYPE_CONVERTERS.get(type);
+                            logger.log(Level.FINER, "{0} using type converter: {1}", new Object[]{field.getName(), converterClazz.getCanonicalName()});
+                            AbstractTypeConverter converter = (AbstractTypeConverter) Class.forName(converterClazz.getCanonicalName()).newInstance();
+                            field.set(entityClassObject, converter.getValue(resultSet, columnName));
+                        } else if (PRIMITIVE_TYPE_CONVERTERS.containsKey(type.getName())) {
+                            Class<?> converterClazz = PRIMITIVE_TYPE_CONVERTERS.get(type.getName());
+                            logger.log(Level.FINER, "{0} using primitive type converter: {1}", new Object[]{field.getName(), converterClazz.getCanonicalName()});
+                            AbstractTypeConverter converter = (AbstractTypeConverter) Class.forName(converterClazz.getCanonicalName()).newInstance();
+                            field.set(entityClassObject, converter.getValue(resultSet, columnName));
+                        } else {
+                            logger.log(Level.SEVERE, "Unknown type {0} when setting data for field ''{1}''.", new Object[]{type.getName(), field.getName()});
+                        }
+                    }
+
+                } catch (IllegalAccessException | IllegalArgumentException | SQLException | ClassNotFoundException | InstantiationException e) {
+                    logger.log(Level.SEVERE, null, e);
+                }
             }
+            return entityClassObject;
+        } else {
+            logger.info("Trying to set data from null entity");
+            return null;
         }
 
-        return (T) entityClassObject;
     }
 
     private void putValue(HashMap values, String key, Object value) {
 
-        if (value instanceof Double) {
-            values.put(key, (Double) value);
-        } else if (value instanceof Float) {
-            values.put(key, (Float) value);
-        } else if (value instanceof Long) {
-            values.put(key, (Long) value);
-        } else if (value instanceof Integer) {
-            values.put(key, (Integer) value);
-        } else if (value instanceof Boolean) {
-            values.put(key, (Boolean) value);
-        } else if (value instanceof String) {
-            values.put(key, (String) value);
+        if (values != null) {
+            if (value instanceof Double) {
+                values.put(key, (Double) value);
+            } else if (value instanceof Float) {
+                values.put(key, (Float) value);
+            } else if (value instanceof Long) {
+                values.put(key, (Long) value);
+            } else if (value instanceof Integer) {
+                values.put(key, (Integer) value);
+            } else if (value instanceof Boolean) {
+                values.put(key, (Boolean) value);
+            } else if (value instanceof String) {
+                values.put(key, (String) value);
+            }
+        } else {
+            logger.severe("Trying to put data into null values");
         }
 
     }
@@ -1102,76 +1071,41 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
         this.tableName = tableName;
     }
 
-    public boolean isDebug() {
-        return debug;
-    }
-
-    public void setDebug(boolean debug) {
-        this.debug = debug;
-    }
-
-    public static HashMap<String, Class> getPrimitiveTypeConverters() {
-        return primitiveTypeConverters;
-    }
-
-    public static HashMap<Class, Class> getTypeConverters() {
-        return typeConverters;
-    }
-
     public String getColumnType(Field field) {
         try {
             Class<?> type = field.getType();
 
-            if (typeConverters.containsKey(type)) {
-                Class<?> converterClazz = typeConverters.get(type);
+            if (TYPE_CONVERTERS.containsKey(type)) {
+                Class<?> converterClazz = TYPE_CONVERTERS.get(type);
                 AbstractTypeConverter converter = (AbstractTypeConverter) Class.forName(converterClazz.getCanonicalName()).newInstance();
                 return converter.getDatabaseType(field);
-            } else if (primitiveTypeConverters.containsKey(type.getName())) {
-                Class<?> converterClazz = primitiveTypeConverters.get(type.getName());
+            } else if (PRIMITIVE_TYPE_CONVERTERS.containsKey(type.getName())) {
+                Class<?> converterClazz = PRIMITIVE_TYPE_CONVERTERS.get(type.getName());
                 AbstractTypeConverter converter = (AbstractTypeConverter) Class.forName(converterClazz.getCanonicalName()).newInstance();
                 return converter.getDatabaseType(field);
             }
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (ClassNotFoundException | IllegalAccessException | InstantiationException e) {
+            logger.log(Level.SEVERE, null, e);
         }
         return null;
     }
 
-    public static void setLogFile(File file) {
+    public void setLogFile(File file) {
         logFile = file;
         if (!logFile.exists()) {
             try {
-                logFile.createNewFile();
-            } catch (IOException ex) {
-                Logger.getLogger(AbstractDatabaseManager.class.getName()).log(Level.SEVERE, null, ex);
-            }
-        }
-    }
-
-    public static void setLoggingEnabled(boolean enabled) {
-        enableLogging = enabled;
-    }
-
-    public static void setLogToStdOut(boolean logToStdOut) {
-        AbstractDatabaseManager.logToStdOut = logToStdOut;
-    }
-
-    private void log(String log) {
-        if (enableLogging) {
-            String msg = DATE_FORMATTER.format(new Date()) + " " + getClass().getSimpleName() + "\t" + log;
-            if (logToStdOut){
-                System.out.println(msg);
-            }
-            if (logFile != null && logFile.exists() && logFile.canWrite()) {
-                try (FileOutputStream fos = new FileOutputStream(logFile, true); OutputStreamWriter osw = new OutputStreamWriter(fos)) {
-                    osw.write(msg);
-                    osw.write("\n");
-                    osw.flush();
-                    osw.close();
-                } catch (Exception ex) {
-
+                boolean ok = logFile.createNewFile();
+                if (!ok) {
+                    logger.log(Level.WARNING, "Failed to create log file {0}", file);
                 }
+            } catch (IOException ex) {
+                logger.log(Level.SEVERE, null, ex);
             }
         }
     }
+
+    public synchronized Logger getLogger() {
+        return logger;
+    }
+
 }

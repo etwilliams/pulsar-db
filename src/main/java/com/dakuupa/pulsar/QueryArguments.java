@@ -1,6 +1,7 @@
 package com.dakuupa.pulsar;
 
 import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Class to contain query arguments
@@ -10,13 +11,13 @@ import java.util.HashMap;
  */
 public class QueryArguments {
 
-    private HashMap<String, Object> args = new HashMap<>();
+    private final HashMap<String, Object> args = new HashMap<>();
 
     public void add(String key, Object value) {
 
         //handle boolean to small int conversion for DB
         if (value instanceof Boolean) {
-            if ((Boolean) value == true) {
+            if ((Boolean) value) {
                 value = 1;
             } else {
                 value = 0;
@@ -26,7 +27,7 @@ public class QueryArguments {
         args.put(key, value);
     }
 
-    public HashMap<String, Object> getArgs() {
+    public Map<String, Object> getArgs() {
         return args;
     }
 

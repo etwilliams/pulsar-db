@@ -21,7 +21,10 @@ public class DateTypeConverter extends MySQLTypeConverter<Date> {
     @Override
     public Long getDatabaseValue(Entity entity, String fieldName) {
         Date val = (Date) getFieldValue(entity, fieldName);
-        return val.getTime();
+        if (val != null) {
+            return val.getTime();
+        }
+        return 0L;
     }
 
     @Override
