@@ -4,13 +4,13 @@ import com.dakuupa.pulsar.annotations.DbColumn;
 import com.dakuupa.pulsar.annotations.DbIgnore;
 import com.dakuupa.pulsar.annotations.DbSize;
 import com.dakuupa.pulsar.annotations.DbTable;
-import com.dakuupa.pulsar.annotations.NoID;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import com.dakuupa.pulsar.annotations.DbImmutableSchema;
+import com.dakuupa.pulsar.annotations.DbNoID;
 
 /**
  * Utility class to ease reflection
@@ -99,7 +99,7 @@ public class ReflectUtil {
      * @return true if class has NoID annotation
      */
     public static boolean noID(Class clazz) {
-        return clazz.isAnnotationPresent(NoID.class);
+        return clazz.isAnnotationPresent(DbNoID.class);
     }
 
     public static boolean fieldIsOkForDatabase(Field field) {
