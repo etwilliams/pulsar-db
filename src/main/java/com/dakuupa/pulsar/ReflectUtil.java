@@ -10,6 +10,7 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import com.dakuupa.pulsar.annotations.DbImmutableSchema;
 
 /**
  * Utility class to ease reflection
@@ -19,10 +20,10 @@ import java.util.List;
  */
 public class ReflectUtil {
 
-    private ReflectUtil(){
+    private ReflectUtil() {
         //hide implicit public constructor
     }
-    
+
     public static List<Field> getAllFields(Class<?> clazz) {
         List<Field> fields = new ArrayList<>();
         fields.addAll(Arrays.asList(clazz.getDeclaredFields()));
@@ -70,7 +71,7 @@ public class ReflectUtil {
             return field.getName();
         }
     }
-    
+
     /**
      * @param field
      * @return columnName annotation value
@@ -81,6 +82,15 @@ public class ReflectUtil {
         } else {
             return 1024;
         }
+    }
+
+    /**
+     *
+     * @param clazz
+     * @return true if field has immutable annotation
+     */
+    public static boolean isImmutable(Class clazz) {
+        return clazz.isAnnotationPresent(DbImmutableSchema.class);
     }
 
     /**

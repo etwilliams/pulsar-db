@@ -39,7 +39,8 @@ import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
 
 /**
- * Base DB Manager Allow types are double, float, long, integer, boolean, and String values.
+ * Base DB Manager Allow types are double, float, long, integer, boolean, and
+ * String values.
  *
  * @author EWilliams
  *
@@ -54,8 +55,8 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
     private Connection dbConnection;
     private Class<T> entityClass;
 
-    private File logFile;
-    private boolean verboseLogging;
+    private static File logFile;
+    private static boolean verboseLogging;
 
     private static final HashMap<Class, Class> TYPE_CONVERTERS = new HashMap<>();
     private static final HashMap<String, Class> PRIMITIVE_TYPE_CONVERTERS = new HashMap<>();
@@ -157,7 +158,7 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
             logger.log(Level.INFO, "Primitive Type Converter {0}", key);
         }
 
-        if (dbConnection != null) {
+        if (dbConnection != null && !ReflectUtil.isImmutable(entityClass)) {
             setupTable();
         }
     }
@@ -290,9 +291,9 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
                     logger.log(Level.INFO, dbColumn.toString());
 
                     if (!entityColumn.equals(dbColumn)) {
-                        logger.log(Level.INFO, "Changes for {0}", columnName);
-                        logger.log(Level.INFO, "Entity\t {0}", entityColumn);
-                        logger.log(Level.INFO, "DB\t {0}", dbColumn);
+                        logger.log(Level.INFO, "\tChanges for {0}", columnName);
+                        logger.log(Level.INFO, "\tEntity\t {0}", entityColumn);
+                        logger.log(Level.INFO, "\tDB\t {0}", dbColumn);
 
                         //remove unique key
                         if (dbColumn.isUnique() && !entityColumn.isUnique()) {
@@ -1090,16 +1091,16 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
         return null;
     }
 
-    public void setLogFile(File file) {
+    public static void setLogFile(File file) {
         logFile = file;
         if (!logFile.exists()) {
             try {
                 boolean ok = logFile.createNewFile();
                 if (!ok) {
-                    logger.log(Level.WARNING, "Failed to create log file {0}", file);
+                    Logger.getLogger(AbstractDatabaseManager.class.getSimpleName()).log(Level.WARNING, "Failed to create log file {0}", file);
                 }
             } catch (IOException ex) {
-                logger.log(Level.SEVERE, null, ex);
+                Logger.getLogger(AbstractDatabaseManager.class.getSimpleName()).log(Level.SEVERE, null, ex);
             }
         }
     }

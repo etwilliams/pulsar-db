@@ -9,7 +9,8 @@ import com.dakuupa.pulsar.annotations.DbSize;
 /**
  * Base DB entity class
  *
- * @author EWilliams Each field corresponds to a column in a table named for the Entity class.
+ * @author EWilliams Each field corresponds to a column in a table named for the
+ * Entity class.
  * @see com.dakuupa.pulsar.db.annotations package for annotations
  * @see com.dakuupa.pulsar.db.AbstractDatabaseManager
  */
@@ -18,22 +19,26 @@ public abstract class Entity {
     @DbPrimaryKey
     @DbAutoIncrement
     @DbNotNull
-    @DbSize(size = 20)
+    @DbSize(size = 11)
     /**
      * id is the primary key for the table.
      */
     protected Long id;
-    
+
     @DbIgnore
     /**
      * persisted is where the object is written to the table or not
      */
     private boolean persisted = false;
-    
-    @DbIgnore
-    public static final int INVALID_ID = -1;
 
-    public Long getId() {
+    @DbIgnore
+    public static final long INVALID_ID = -1;
+
+    public int getId() {
+        return Integer.parseInt(id+"");
+    }
+
+    public Long getIdLong() {
         return id;
     }
 
