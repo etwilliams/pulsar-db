@@ -34,11 +34,7 @@ public abstract class Entity {
     @DbIgnore
     public static final long INVALID_ID = -1;
 
-    public int getId() {
-        return Integer.parseInt(id+"");
-    }
-
-    public Long getIdLong() {
+    public Long getId() {
         return id;
     }
 

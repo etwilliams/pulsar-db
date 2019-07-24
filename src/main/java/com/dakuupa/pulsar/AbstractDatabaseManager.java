@@ -762,7 +762,7 @@ public abstract class AbstractDatabaseManager<T extends Entity> {
         return false;
     }
 
-    public T read(int id) {
+    public T read(long id) {
         try {
             String query = "SELECT * FROM " + tableName + " WHERE id  = " + id;
 
